@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetGuard AI | Enterprise SOC Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600;700&display=swap');
+        
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --accent-blue: #58a6ff;
+            --accent-red: #f85149;
+            --accent-green: #3fb950;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: #c9d1d9;
+            overflow-x: hidden;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        .dashboard-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            transition: border-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .dashboard-card:hover {
+            border-color: #484f58;
+        }
+
+        .status-pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(63, 185, 80, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+        }
+
+        .threat-pulse {
+            animation: threat-pulse 0.5s infinite alternate;
+        }
+
+        @keyframes threat-pulse {
+            from { text-shadow: 0 0 0px #f85149; transform: scale(1); }
+            to { text-shadow: 0 0 15px #f85149; transform: scale(1.1); }
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+        /* Animation for logs */
+        @keyframes fadeInRight {
+            from { opacity: 0; transform: translateX(10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        .log-entry {
+            animation: fadeInRight 0.3s ease-out forwards;
+        }
+
+        .map-ping {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div id="app" class="min-h-screen flex flex-col">
+        
+        <!-- --- Top Navigation & Global Stats --- -->
+        <nav class="bg-[#161b22] border-b border-[#30363d] px-6 py-4 flex items-center justify-between z-20 shadow-xl">
+            <div class="flex items-center space-x-4">
+                <div class="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/20">
+                    <i data-lucide="shield-check" class="text-white w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white">NetGuard AI <span class="text-xs font-normal text-blue-400 border border-blue-400/30 px-1 rounded ml-1">v2.5</span></h1>
+                    <div class="flex items-center text-[10px] text-gray-400 uppercase tracking-widest mt-0.5">
+                        <span id="system-status-indicator" class="status-pulse bg-gray-500"></span>
+                        <span id="system-status-text">System Standby</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex space-x-12 items-center">
+                <div class="hidden md:block text-right">
+                    <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Total Packets</p>
+                    <p id="stat-requests" class="text-2xl font-bold mono text-blue-400 leading-none">0</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] text-gray-500 uppercase font-bold tracking-widest">Threats Identified</p>
+                    <p id="stat-threats" class="text-2xl font-bold mono text-red-500 leading-none">0</p>
+                </div>
+                <button id="toggle-monitor" onclick="monitor.toggle()" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all transform active:scale-95 shadow-lg shadow-blue-900/40">
+                    Initialize Monitor
+                </button>
+            </div>
+        </nav>
+
+        <!-- --- Main Dashboard Grid --- -->
+        <main class="flex-grow p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-hidden">
+            
+            <!-- Left Side: Visualization & Map (Col 1-8) -->
+            <div class="lg:col-span-8 flex flex-col space-y-6 overflow-y-auto pr-1">
+                
+                <!-- 1. Global Traffic Origin Analysis -->
+                <div class="dashboard-card p-6 h-[400px] relative flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold flex items-center text-white">
+                            <i data-lucide="globe" class="w-5 h-5 mr-2 text-blue-400"></i>
+                            Geo-Spatial Traffic Analysis
+                        </h2>
+                        <div class="flex space-x-4 text-[10px] uppercase font-bold tracking-tighter">
+                            <span class="flex items-center"><span class="w-2 h-2 bg-blue-500 rounded-full mr-1.5 shadow-[0_0_5px_#3b82f6]"></span> Clean Traffic</span>
+                            <span class="flex items-center"><span class="w-2 h-2 bg-red-500 rounded-full mr-1.5 shadow-[0_0_5px_#ef4444]"></span> Threat Source</span>
+                        </div>
+                    </div>
+                    
+                    <div id="map-container" class="flex-grow bg-[#0d1117] rounded-lg relative overflow-hidden flex items-center justify-center border border-[#30363d]">
+                        <!-- SVG Map Background -->
+                        <svg viewBox="0 0 800 400" class="w-full h-full opacity-10 text-blue-100">
+                            <path d="M150,100 Q200,80 250,100 T350,100 T450,120 T550,100 T700,150" fill="none" stroke="currentColor" stroke-width="1.5" />
+                            <circle cx="200" cy="150" r="80" fill="currentColor" opacity="0.05" />
+                            <circle cx="600" cy="250" r="100" fill="currentColor" opacity="0.05" />
+                            <rect x="0" y="0" width="800" height="400" fill="none" stroke="currentColor" stroke-width="0.5" stroke-dasharray="10,10" />
+                        </svg>
+
+                        <!-- Dynamic Coordinate Ping Layer -->
+                        <div id="ping-layer" class="absolute inset-0 pointer-events-none"></div>
+                        
+                        <div class="absolute top-4 left-4 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded border border-[#30363d] text-[10px] mono">
+                            ACTIVE_SESSIONS: <span id="ping-latency" class="text-green-400">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Throughput Chart Section -->
+                <div class="dashboard-card p-6 h-[320px] flex flex-col">
+                    <div class="flex justify-between items-center mb-6">
+                        <div>
+                            <h2 class="text-lg font-bold flex items-center text-white leading-none">
+                                <i data-lucide="activity" class="w-5 h-5 mr-2 text-green-400"></i>
+                                Real-time Throughput
+                            </h2>
+                            <p class="text-xs text-gray-500 mt-1">Global PPS (Packets Per Second)</p>
+                        </div>
+                        <div class="text-right">
+                            <span id="bandwidth-readout" class="text-xl font-bold mono text-green-400">0.00 Mbps</span>
+                            <div class="text-[9px] text-gray-500 uppercase tracking-widest">Est. Bandwidth</div>
+                        </div>
+                    </div>
+                    <div class="flex-grow min-h-0">
+                        <canvas id="throughputChart"></canvas>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Right Side: Threat Engine & Logs (Col 9-12) -->
+            <div class="lg:col-span-4 flex flex-col space-y-6 overflow-hidden">
+                
+                <!-- 3. AI Security Insights Engine -->
+                <div class="dashboard-card p-6 border-l-4 border-yellow-500 flex-shrink-0 bg-gradient-to-br from-[#161b22] to-[#1c2128]">
+                    <h2 class="text-lg font-bold mb-4 flex items-center text-white">
+                        <i data-lucide="zap" class="w-5 h-5 mr-2 text-yellow-500"></i>
+                        AI Behavioral Analysis
+                    </h2>
+                    <div id="ai-insight-panel" class="min-h-[80px]">
+                        <div class="p-4 bg-gray-900/50 rounded-lg border border-[#30363d] flex flex-col items-center justify-center text-center">
+                            <i data-lucide="cpu" class="w-6 h-6 text-gray-600 mb-2"></i>
+                            <p class="text-xs text-gray-500 italic">Initialize monitor to begin heuristic profiling...</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Sensitivity Control -->
+                    <div class="mt-6 pt-4 border-t border-[#30363d]">
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Heuristic Sensitivity</label>
+                            <span id="sensitivity-value" class="text-xs mono text-blue-400">75%</span>
+                        </div>
+                        <input type="range" id="sensitivity-slider" min="10" max="100" value="75" oninput="monitor.updateSensitivity(this.value)"
+                            class="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                    </div>
+                </div>
+
+                <!-- 4. Live Event Log Terminal -->
+                <div class="dashboard-card flex-grow flex flex-col min-h-0 overflow-hidden border-t-4 border-blue-500/50">
+                    <div class="p-4 border-b border-[#30363d] flex justify-between items-center bg-[#0d1117]/50">
+                        <h2 class="text-sm font-bold flex items-center text-gray-300">
+                            <i data-lucide="terminal" class="w-4 h-4 mr-2 text-blue-400"></i>
+                            SYSTEM SYSLOG
+                        </h2>
+                        <span class="text-[9px] bg-gray-800 text-gray-500 px-2 py-0.5 rounded border border-gray-700 uppercase font-bold tracking-tighter">Rolling 100</span>
+                    </div>
+                    <div id="event-log" class="flex-grow overflow-y-auto p-4 space-y-1.5 mono text-[10px] leading-relaxed bg-[#0d1117]/80">
+                        <div class="text-gray-600 italic">Standby... System is awaiting initialization signal.</div>
+                    </div>
+                    <div class="p-2 bg-[#161b22] border-t border-[#30363d] flex justify-between items-center text-[9px] text-gray-600 mono">
+                        <span>CLUSTER: SOC-US-EAST-01</span>
+                        <span id="packet-clock">00:00:00</span>
+                    </div>
+                </div>
+
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        /**
+         * NetworkMonitor Core Logic
+         * Manages simulation, heuristics, and UI updates.
+         */
+        class NetworkMonitor {
+            constructor() {
+                this.isActive = false;
+                this.requests = 0;
+                this.threats = 0;
+                this.sensitivity = 0.75;
+                
+                this.packetLoop = null;
+                this.chartLoop = null;
+                this.insightLoop = null;
+                
+                this.chart = null;
+                this.chartBuffer = Array(60).fill(0);
+                this.lastRequestCount = 0;
+
+                this.init();
+            }
+
+            init() {
+                lucide.createIcons();
+                this.setupChart();
+                this.updateClock();
+                setInterval(() => this.updateClock(), 1000);
+            }
+
+            setupChart() {
+                const ctx = document.getElementById('throughputChart').getContext('2d');
+                
+                const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+                gradient.addColorStop(0, 'rgba(63, 185, 80, 0.4)');
+                gradient.addColorStop(1, 'rgba(63, 185, 80, 0)');
+
+                this.chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: Array(60).fill(''),
+                        datasets: [{
+                            data: this.chartBuffer,
+                            borderColor: '#3fb950',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: true,
+                            backgroundColor: gradient,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                        scales: {
+                            y: { 
+                                beginAtZero: true, 
+                                grid: { color: 'rgba(48, 54, 61, 0.5)', drawBorder: false },
+                                ticks: { color: '#8b949e', font: { family: 'JetBrains Mono', size: 9 } }
+                            },
+                            x: { 
+                                grid: { display: false, drawBorder: false }, 
+                                ticks: { display: false } 
+                            }
+                        },
+                        animation: false
+                    }
+                });
+            }
+
+            toggle() {
+                const btn = document.getElementById('toggle-monitor');
+                const indicator = document.getElementById('system-status-indicator');
+                const statusText = document.getElementById('system-status-text');
+
+                if (this.isActive) {
+                    this.stop();
+                    btn.textContent = 'Initialize Monitor';
+                    btn.className = "px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all transform active:scale-95 shadow-lg shadow-blue-900/40";
+                    indicator.classList.replace('bg-green-500', 'bg-gray-500');
+                    statusText.textContent = "System Standby";
+                } else {
+                    this.start();
+                    btn.textContent = 'Terminate Monitor';
+                    btn.className = "px-6 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition-all transform active:scale-95 shadow-lg shadow-red-900/40";
+                    indicator.classList.replace('bg-gray-500', 'bg-green-500');
+                    statusText.textContent = "Real-time Scanning Active";
+                }
+            }
+
+            start() {
+                this.isActive = true;
+                this.log('BOOT', 'Core behavioral kernel loading...', 'info');
+                this.log('MONITOR', 'Packet analysis engine engaged. Scanning OSI Layer 3/4/7.', 'success');
+                
+                // Packet Stream Loop
+                this.packetLoop = setInterval(() => this.simulatePackets(), 150);
+
+                // Chart Update Loop (1s)
+                this.chartLoop = setInterval(() => this.updateChartData(), 1000);
+
+                // AI Insight Loop
+                this.insightLoop = setInterval(() => this.generateInsight(), 7000);
+            }
+
+            stop() {
+                this.isActive = false;
+                clearInterval(this.packetLoop);
+                clearInterval(this.chartLoop);
+                clearInterval(this.insightLoop);
+                this.log('SYSTEM', 'Monitor termination signal received. Secure shutdown.', 'warn');
+            }
+
+            updateSensitivity(val) {
+                this.sensitivity = val / 100;
+                document.getElementById('sensitivity-value').textContent = `${val}%`;
+            }
+
+            simulatePackets() {
+                // Higher sensitivity increases burst frequency
+                const intensity = Math.random() + (this.sensitivity * 0.4);
+                const packetCount = Math.floor(Math.random() * 8 * intensity) + 1;
+
+                for (let i = 0; i < packetCount; i++) {
+                    this.requests++;
+                    
+                    const isThreat = Math.random() < (0.04 * this.sensitivity);
+                    
+                    const ip = this.generateIP();
+                    const proto = Math.random() > 0.3 ? 'TCP' : 'UDP';
+                    const port = [80, 443, 22, 53, 3306, 8080, 21][Math.floor(Math.random() * 7)];
+
+                    if (isThreat) {
+                        this.handleThreat(ip, port, proto);
+                    } else if (Math.random() < 0.1) {
+                        this.log(proto, `Incoming connection from origin ${ip}:${port}`, 'info');
+                    }
+
+                    this.spawnPingOnMap(isThreat);
+                }
+
+                document.getElementById('stat-requests').textContent = this.requests.toLocaleString();
+            }
+
+            handleThreat(ip, port, proto) {
+                this.threats++;
+                const threatTypes = ['PORT SCAN', 'SYN FLOOD', 'BRUTE FORCE', 'SQL INJECTION', 'DDoS BURST', 'RFI ATTEMPT'];
+                const type = threatTypes[Math.floor(Math.random() * threatTypes.length)];
+                
+                this.log('ALERT', `${type} detected from source ${ip} -> Port ${port}`, 'danger');
+                document.getElementById('stat-threats').textContent = this.threats.toLocaleString();
+                
+                const counter = document.getElementById('stat-threats');
+                counter.classList.add('threat-pulse');
+                setTimeout(() => counter.classList.remove('threat-pulse'), 1000);
+            }
+
+            updateChartData() {
+                const currentSecTotal = this.requests;
+                const delta = currentSecTotal - this.lastRequestCount;
+                this.lastRequestCount = currentSecTotal;
+
+                this.chartBuffer.push(delta);
+                this.chartBuffer.shift();
+
+                this.chart.data.datasets[0].data = this.chartBuffer;
+                this.chart.update();
+
+                // Est Mbps: Approx 0.08MB per packet simulation
+                const mbps = (delta * 0.08).toFixed(2);
+                document.getElementById('bandwidth-readout').textContent = `${mbps} Mbps`;
+                document.getElementById('ping-latency').textContent = Math.floor(Math.random() * 20 + 5);
+            }
+
+            spawnPingOnMap(isThreat) {
+                const container = document.getElementById('ping-layer');
+                const ping = document.createElement('div');
+                
+                // Random position within map area
+                const x = Math.random() * 95;
+                const y = Math.random() * 95;
+                
+                const color = isThreat ? '#f85149' : '#58a6ff';
+                const shadow = isThreat ? '0 0 10px #f85149' : '0 0 8px #58a6ff';
+                
+                ping.className = `map-ping transition-opacity duration-1000`;
+                ping.style.backgroundColor = color;
+                ping.style.boxShadow = shadow;
+                ping.style.left = `${x}%`;
+                ping.style.top = `${y}%`;
+                
+                container.appendChild(ping);
+                
+                setTimeout(() => {
+                    ping.style.opacity = '0';
+                    setTimeout(() => ping.remove(), 1000);
+                }, 400);
+            }
+
+            generateInsight() {
+                const insights = [
+                    "Unusual UDP traffic spike from subnet 185.xx. Threshold adjusted.",
+                    "Neural cluster 04 suggests potential reconnaissance scan on DB ports.",
+                    "SSL/TLS latency stable. Edge caching efficiency at 94%.",
+                    "Spike in POST requests from EU-CENTRAL region. Monitoring for patterns.",
+                    "Signature match: Potential SQLi attempt blocked on Cluster 01.",
+                    "Anomaly detected: Packet payload sizes decreased by 15%. Beaconing check.",
+                    "Cognitive engine suggests rate-limiting subnet 45.1.x.x due to jitter."
+                ];
+                
+                const panel = document.getElementById('ai-insight-panel');
+                const text = insights[Math.floor(Math.random() * insights.length)];
+                
+                panel.innerHTML = `
+                    <div class="p-3 bg-blue-900/10 rounded-lg border border-blue-500/20 text-xs animate-in fade-in slide-in-from-right duration-500">
+                        <div class="flex items-center mb-1 text-blue-400 font-bold uppercase tracking-wider">
+                            <i data-lucide="brain-circuit" class="w-4 h-4 mr-2"></i> Cognitive Core Alpha
+                        </div>
+                        <p class="text-gray-300 leading-relaxed italic">"${text}"</p>
+                    </div>
+                `;
+                lucide.createIcons();
+            }
+
+            log(service, message, type) {
+                const logEl = document.getElementById('event-log');
+                const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                
+                if (logEl.querySelector('.text-gray-600')) logEl.innerHTML = '';
+
+                const styles = {
+                    info: 'text-gray-400',
+                    warn: 'text-yellow-400',
+                    danger: 'text-red-500 font-bold',
+                    success: 'text-green-500'
+                };
+
+                const div = document.createElement('div');
+                div.className = `log-entry py-0.5 border-b border-[#30363d]/10 ${styles[type]}`;
+                div.innerHTML = `
+                    <span class="text-gray-600">[${time}]</span> 
+                    <span class="text-blue-500 font-bold">${service}</span>: ${message}
+                `;
+                
+                logEl.insertBefore(div, logEl.firstChild);
+
+                if (logEl.children.length > 100) {
+                    logEl.removeChild(logEl.lastChild);
+                }
+            }
+
+            updateClock() {
+                const clock = document.getElementById('packet-clock');
+                clock.textContent = new Date().toLocaleTimeString([], { hour12: false });
+            }
+
+            generateIP() {
+                return Array(4).fill(0).map(() => Math.floor(Math.random() * 255)).join('.');
+            }
+        }
+
+        // Initialize Global Instance
+        const monitor = new NetworkMonitor();
+    </script>
+</body>
+</html>
