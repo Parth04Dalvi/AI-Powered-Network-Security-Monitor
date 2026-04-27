@@ -2,6 +2,9 @@
 
 Real-time Traffic Analysis & Threat Detection Dashboard
 
+<img width="651" height="641" alt="image" src="https://github.com/user-attachments/assets/2f382be0-db53-4c0a-937c-200d2c15afd9" />
+
+
 This project is a high-fidelity web application that simulates a professional network security monitoring tool. It demonstrates the ability to handle high-frequency data streams, implement real-time anomaly detection logic, and visualize complex network metrics for security operations centers (SOC).
 
 ✨ Key Features & Technical Highlights
